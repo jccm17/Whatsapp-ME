@@ -1,8 +1,0 @@
-MIDlet-1: WPJava,/com/resources/icon.png,com.wpjava.WPJavaMidlet
-MIDlet-Vendor: JC
-MIDlet-Version: 1.0.0
-MIDlet-Name: WPJava
-MIDlet-Permissions: javax.microedition.io.Connector.http
-MIDlet-Permissions-Opt: javax.microedition.io.Connector.https
-MicroEdition-Configuration: CLDC-1.1
-MicroEdition-Profile: MIDP-2.1

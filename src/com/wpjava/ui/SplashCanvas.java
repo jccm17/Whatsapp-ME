@@ -6,6 +6,7 @@ import javax.microedition.lcdui.Image;
 
 import com.wpjava.core.Config;
 import com.wpjava.core.Router;
+import com.wpjava.core.Theme;
 import com.wpjava.storage.PreferenceStorage;
 import com.wpjava.util.ImageUtil;
 
@@ -44,17 +45,17 @@ public class SplashCanvas extends Canvas implements Runnable {
     protected void paint(Graphics g) {
         int w = getWidth();
         int h = getHeight();
-        g.setColor(255, 255, 255);
+        g.setColor(Theme.splashBg());
         g.fillRect(0, 0, w, h);
         if (icon != null) {
             g.drawImage(icon, w / 2, 42, Graphics.HCENTER | Graphics.TOP);
         } else {
-            g.setColor(18, 140, 126);
+            g.setColor(Theme.splashText());
             g.fillRoundRect((w - 72) / 2, 44, 72, 72, 18, 18);
             g.setColor(255, 255, 255);
             g.drawString("WP", w / 2, 66, Graphics.HCENTER | Graphics.TOP);
         }
-        g.setColor(18, 140, 126);
+        g.setColor(Theme.splashText());
         g.drawString("WPJava", w / 2, 130, Graphics.HCENTER | Graphics.TOP);
         g.drawRect(30, 170, w - 60, 8);
         g.fillRect(30, 170, (w - 60) * progress / 100, 8);

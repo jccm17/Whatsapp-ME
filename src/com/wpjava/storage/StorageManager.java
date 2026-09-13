@@ -6,5 +6,6 @@ public class StorageManager {
         new SessionStorage().clear();
         new ChatStorage().clear();
         new MessageStorage().clear();
+        Storage.getInstance().clearAudio();
     }
 }

@@ -7,4 +7,9 @@ public class Chat {
     public String lastMessage;
     public long timestamp;
     public int unread;
+    public boolean archived;
+
+    public boolean isGroup() {
+        return id != null && id.endsWith("@g.us");
+    }
 }

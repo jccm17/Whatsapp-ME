@@ -49,6 +49,25 @@ public class RecordStorage {
         }
     }
 
+    protected void replaceAll(String storeName, String[] values) {
+        RecordStore rs = null;
+        try {
+            try {
+                RecordStore.deleteRecordStore(storeName);
+            } catch (Exception ignored) {
+            }
+            rs = RecordStore.openRecordStore(storeName, true);
+            int i;
+            for (i = 0; values != null && i < values.length; i++) {
+                byte[] data = values[i].getBytes("UTF-8");
+                rs.addRecord(data, 0, data.length);
+            }
+        } catch (Exception e) {
+        } finally {
+            close(rs);
+        }
+    }
+
     protected String[] readAll(String storeName) {
         RecordStore rs = null;
         RecordEnumeration en = null;

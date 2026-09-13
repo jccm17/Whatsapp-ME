@@ -4,8 +4,8 @@ import java.util.Vector;
 
 import com.wpjava.model.Chat;
 import com.wpjava.model.Message;
-import com.wpjava.core.Config;
 import com.wpjava.service.ApiClient;
+import com.wpjava.storage.Storage;
 
 public class JsonParser {
 
@@ -22,27 +22,29 @@ public class JsonParser {
         for (index = 0; index < objects.size(); index++) {
             String item = (String) objects.elementAt(index);
             Chat c = new Chat();
-            c.id = normalizeField(field(item, "id"));
+            c.id = normalizeField(valueOrEmpty(item, "id"));
             if (c.id.length() == 0) {
-                c.id = normalizeField(field(item, "chatId"));
+                c.id = normalizeField(valueOrEmpty(item, "chatId"));
             }
             if (c.id.length() == 0) {
-                c.id = normalizeField(field(item, "from"));
+                c.id = normalizeField(valueOrEmpty(item, "from"));
             }
-            c.name = field(item, "name");
+            c.name = valueOrEmpty(item, "name");
             if (c.name.length() == 0) {
                 c.name = displayName(c.id);
             }
-            c.lastMessage = field(item, "lastMessage");
+            c.lastMessage = valueOrEmpty(item, "lastMessage");
             if (c.lastMessage.length() == 0) {
-                c.lastMessage = field(item, "last_message");
+                c.lastMessage = valueOrEmpty(item, "last_message");
             }
             if (c.lastMessage.length() == 0) {
-                c.lastMessage = field(item, "text");
+                c.lastMessage = valueOrEmpty(item, "text");
             }
             c.lastMessage = EmojiUtil.toDisplay(c.lastMessage);
-            c.timestamp = parseLong(field(item, "timestamp"));
-            c.unread = parseInt(field(item, "unread"));
+            c.timestamp = getLong(item, "timestamp");
+            c.unread = parseInt(valueOrEmpty(item, "unread"));
+            c.avatar = fullUrl(valueOrEmpty(item, "avatarUrl"));
+            c.archived = "true".equals(valueOrEmpty(item, "archived"));
             if (c.id.length() > 0) {
                 chats.addElement(c);
             }
@@ -84,11 +86,11 @@ public class JsonParser {
         for (index = 0; index < objects.size(); index++) {
             String item = (String) objects.elementAt(index);
             Message m = new Message();
-            m.id = field(item, "id");
-            String from = normalizeField(field(item, "from"));
-            String to = normalizeField(field(item, "to"));
-            String sendTo = normalizeField(field(item, "sendTo"));
-            String itemChatId = normalizeField(field(item, "chatId"));
+            m.id = valueOrEmpty(item, "id");
+            String from = normalizeField(valueOrEmpty(item, "from"));
+            String to = normalizeField(valueOrEmpty(item, "to"));
+            String sendTo = normalizeField(valueOrEmpty(item, "sendTo"));
+            String itemChatId = normalizeField(valueOrEmpty(item, "chatId"));
             if (itemChatId.length() == 0) {
                 itemChatId = sendTo.length() > 0 ? sendTo
                         : (from.length() == 0 || "me".equals(from) ? to : from);
@@ -98,15 +100,15 @@ public class JsonParser {
             } else {
                 m.chatId = ApiClient.normalizeRecipient(chatId);
             }
-            m.body = field(item, "body");
+            m.body = valueOrEmpty(item, "body");
             if (m.body.length() == 0) {
-                m.body = field(item, "text");
+                m.body = valueOrEmpty(item, "text");
             }
-            m.body = EmojiUtil.toDisplay(m.body);
-            m.timestamp = parseLong(field(item, "timestamp"));
-            m.mediaUrl = fullUrl(field(item, "mediaUrl"));
-            m.mediaType = field(item, "mediaType");
-            m.incoming = !"false".equals(field(item, "incoming"));
+            m.body = EmojiUtil.toMessageDisplay(m.body);
+            m.timestamp = getLong(item, "timestamp");
+            m.mediaUrl = fullUrl(valueOrEmpty(item, "mediaUrl"));
+            m.mediaType = valueOrEmpty(item, "mediaType");
+            m.incoming = !"false".equals(valueOrEmpty(item, "incoming"));
             if (m.body.length() > 0
                     && (chatId == null
                     || sameChat(ApiClient.normalizeRecipient(chatId), itemChatId)
@@ -120,59 +122,23 @@ public class JsonParser {
     }
 
     public static boolean linked(String json) {
-        return json != null && json.indexOf("linked") >= 0
-                && json.indexOf("true") >= 0;
+        return getBoolean(json, "linked");
     }
 
-    private static String field(String json, String name) {
-        String quoted = "\"" + name + "\"";
-        int p = json.indexOf(quoted);
-        if (p < 0) {
-            return "";
-        }
-        int colon = json.indexOf(':', p + quoted.length());
-        if (colon < 0) {
-            return "";
-        }
-        int valueStart = colon + 1;
-        while (valueStart < json.length() && json.charAt(valueStart) <= ' ') {
-            valueStart++;
-        }
-        if (valueStart >= json.length()) {
-            return "";
+    /** Returns a scalar JSON value, or null when the key is absent or not scalar. */
+    public static String getString(String json, String name) {
+        int valueStart = findValueStart(json, name);
+        if (valueStart < 0) {
+            return null;
         }
         if (json.charAt(valueStart) == '"') {
-            StringBuffer sb = new StringBuffer();
-            int i;
-            boolean escaped = false;
-            for (i = valueStart + 1; i < json.length(); i++) {
-                char ch = json.charAt(i);
-                if (escaped) {
-                    if (ch == 'u' && i + 4 < json.length()) {
-                        int code = hex(json.substring(i + 1, i + 5));
-                        if (code >= 0) {
-                            sb.append((char) code);
-                            i += 4;
-                        }
-                    } else if (ch == 'n') {
-                        sb.append('\n');
-                    } else if (ch == 't') {
-                        sb.append('\t');
-                    } else {
-                        sb.append(ch);
-                    }
-                    escaped = false;
-                } else if (ch == '\\') {
-                    escaped = true;
-                } else if (ch == '"') {
-                    return sb.toString();
-                } else {
-                    sb.append(ch);
-                }
-            }
-            return sb.toString();
+            int end = findStringEnd(json, valueStart);
+            return end < 0 ? null : unescape(json.substring(valueStart + 1, end));
         }
-
+        char first = json.charAt(valueStart);
+        if (first == '{' || first == '[') {
+            return null;
+        }
         int end = valueStart;
         while (end < json.length()) {
             char ch = json.charAt(end);
@@ -184,21 +150,154 @@ public class JsonParser {
         return trim(json.substring(valueStart, end));
     }
 
-    private static Vector objectsFromArray(String json, String arrayName) {
-        String quoted = "\"" + arrayName + "\"";
-        int p = json.indexOf(quoted);
-        if (p < 0) {
-            return new Vector();
-        }
-        int start = json.indexOf('[', p + quoted.length());
-        if (start < 0) {
-            return new Vector();
+    public static long getLong(String json, String name) {
+        return parseLong(getString(json, name));
+    }
+
+    public static boolean getBoolean(String json, String name) {
+        return "true".equalsIgnoreCase(getString(json, name));
+    }
+
+    /** Returns raw JSON elements from the named array, preserving nested values. */
+    public static Vector getArray(String json, String name) {
+        Vector elements = new Vector();
+        int start = findValueStart(json, name);
+        if (start < 0 || json.charAt(start) != '[') {
+            return elements;
         }
         int end = findMatching(json, start, '[', ']');
         if (end < 0) {
-            return new Vector();
+            return elements;
         }
-        return allObjects(json.substring(start + 1, end));
+        splitElements(json.substring(start + 1, end), elements);
+        return elements;
+    }
+
+    private static String valueOrEmpty(String json, String name) {
+        String value = getString(json, name);
+        return value == null ? "" : value;
+    }
+
+    private static int findValueStart(String json, String name) {
+        if (json == null || name == null) {
+            return -1;
+        }
+        int i = 0;
+        while (i < json.length()) {
+            if (json.charAt(i) != '"') {
+                i++;
+                continue;
+            }
+            int keyEnd = findStringEnd(json, i);
+            if (keyEnd < 0) {
+                return -1;
+            }
+            if (name.equals(unescape(json.substring(i + 1, keyEnd)))) {
+                int colon = keyEnd + 1;
+                while (colon < json.length() && json.charAt(colon) <= ' ') {
+                    colon++;
+                }
+                if (colon < json.length() && json.charAt(colon) == ':') {
+                    int valueStart = colon + 1;
+                    while (valueStart < json.length() && json.charAt(valueStart) <= ' ') {
+                        valueStart++;
+                    }
+                    return valueStart < json.length() ? valueStart : -1;
+                }
+            }
+            i = keyEnd + 1;
+        }
+        return -1;
+    }
+
+    private static int findStringEnd(String text, int start) {
+        int i;
+        boolean escaped = false;
+        for (i = start + 1; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (escaped) {
+                escaped = false;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static void splitElements(String text, Vector elements) {
+        int depth = 0;
+        int start = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        int i;
+        for (i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+            } else if (ch == '"') {
+                inString = true;
+            } else if (ch == '{' || ch == '[') {
+                depth++;
+            } else if (ch == '}' || ch == ']') {
+                depth--;
+            } else if (ch == ',' && depth == 0) {
+                addElement(text, start, i, elements);
+                start = i + 1;
+            }
+        }
+        addElement(text, start, text.length(), elements);
+    }
+
+    private static void addElement(String text, int start, int end, Vector elements) {
+        String element = trim(text.substring(start, end));
+        if (element.length() > 0) {
+            elements.addElement(element);
+        }
+    }
+
+    private static String unescape(String value) {
+        if (value.indexOf('\\') < 0) {
+            return value;
+        }
+        StringBuffer result = new StringBuffer(value.length());
+        int i;
+        for (i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (ch != '\\' || i + 1 >= value.length()) {
+                result.append(ch);
+                continue;
+            }
+            char escaped = value.charAt(++i);
+            if (escaped == 'b') result.append('\b');
+            else if (escaped == 'f') result.append('\f');
+            else if (escaped == 'n') result.append('\n');
+            else if (escaped == 'r') result.append('\r');
+            else if (escaped == 't') result.append('\t');
+            else if (escaped == 'u' && i + 4 < value.length()) {
+                int code = hex(value.substring(i + 1, i + 5));
+                if (code >= 0) {
+                    result.append((char) code);
+                    i += 4;
+                } else {
+                    result.append('u');
+                }
+            } else {
+                result.append(escaped);
+            }
+        }
+        return result.toString();
+    }
+
+    private static Vector objectsFromArray(String json, String arrayName) {
+        return getArray(json, arrayName);
     }
 
     private static Vector allObjects(String json) {
@@ -327,7 +426,11 @@ public class JsonParser {
             return value;
         }
         if (value.charAt(0) == '/') {
-            return Config.API_URL + value;
+            String server = Storage.getInstance().getServerUrl();
+            while (server.endsWith("/")) {
+                server = server.substring(0, server.length() - 1);
+            }
+            return server + value;
         }
         return value;
     }

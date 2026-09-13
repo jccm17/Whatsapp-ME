@@ -10,51 +10,80 @@ public class MessageStorage extends RecordStorage {
     private static final String STORE = "wp_messages";
 
     public void save(Message m) {
-        if (m != null) {
-            add(STORE, encode(m));
+        if (m == null) return;
+        Vector messages = getAll();
+        int i;
+        for (i = messages.size() - 1; i >= 0; i--) {
+            Message current = (Message) messages.elementAt(i);
+            if (sameId(current.id, m.id)) messages.removeElementAt(i);
         }
+        messages.addElement(m);
+        saveAll(messages);
     }
 
     public Vector getMessages(String chatId) {
-        String[] rows = readAll(STORE);
+        Vector all = getAll();
         Vector messages = new Vector();
         int i;
-        for (i = 0; i < rows.length; i++) {
-            Message m = decode(rows[i]);
-            if (m != null && same(m.chatId, chatId)) {
+        for (i = 0; i < all.size(); i++) {
+            Message m = (Message) all.elementAt(i);
+            if (same(m.chatId, chatId)) {
                 messages.addElement(m);
             }
         }
-        if (messages.size() == 0) {
-            messages.addElement(sample(chatId, "Hola", true));
-            messages.addElement(sample(chatId, "Hola amigo", false));
-            messages.addElement(sample(chatId, "Como estas?", true));
-        }
         return messages;
+    }
+
+    public void saveAll(Vector messages) {
+        int size = messages == null ? 0 : messages.size();
+        int start = size > 300 ? size - 300 : 0;
+        String[] rows = new String[size - start];
+        int i;
+        for (i = start; i < size; i++) rows[i - start] = encode((Message) messages.elementAt(i));
+        replaceAll(STORE, rows);
     }
 
     public int countUnread() {
         return 0;
     }
 
+    public void updateStatus(String messageId, String status) {
+        if (messageId == null || messageId.length() == 0) return;
+        Vector messages = getAll();
+        boolean changed = false;
+        int i;
+        for (i = 0; i < messages.size(); i++) {
+            Message message = (Message) messages.elementAt(i);
+            if (messageId.equals(message.id)) {
+                message.status = status == null ? "" : status;
+                changed = true;
+            }
+        }
+        if (changed) saveAll(messages);
+    }
+
     public void clear() {
         clear(STORE);
     }
 
-    private Message sample(String chatId, String body, boolean incoming) {
-        Message m = new Message();
-        m.id = String.valueOf(System.currentTimeMillis());
-        m.chatId = chatId;
-        m.body = body;
-        m.incoming = incoming;
-        m.status = "ok";
-        m.timestamp = System.currentTimeMillis();
-        return m;
+    private Vector getAll() {
+        String[] rows = readAll(STORE);
+        Vector messages = new Vector();
+        int i;
+        for (i = 0; i < rows.length; i++) {
+            Message m = decode(rows[i]);
+            if (m != null) messages.addElement(m);
+        }
+        return messages;
     }
 
     private boolean same(String a, String b) {
         return a != null && b != null
                 && ApiClient.normalizeRecipient(a).equals(ApiClient.normalizeRecipient(b));
+    }
+
+    private boolean sameId(String a, String b) {
+        return a != null && a.length() > 0 && a.equals(b);
     }
 
     private String encode(Message m) {

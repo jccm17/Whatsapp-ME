@@ -8,22 +8,30 @@ import javax.microedition.lcdui.CommandListener;
 import javax.microedition.lcdui.Displayable;
 import javax.microedition.lcdui.Font;
 import javax.microedition.lcdui.Graphics;
+import javax.microedition.lcdui.Image;
 
 import com.wpjava.WPJavaMidlet;
 import com.wpjava.core.Router;
+import com.wpjava.core.ScreenManager;
+import com.wpjava.core.Theme;
 import com.wpjava.model.Chat;
 import com.wpjava.service.ApiClient;
+import com.wpjava.service.RealtimeEvents;
 import com.wpjava.storage.ChatStorage;
+import com.wpjava.util.AvatarCache;
 import com.wpjava.util.DateUtil;
 
-public class ChatListScreen extends Canvas implements CommandListener, Runnable {
+public class ChatListScreen extends Canvas implements CommandListener, Runnable,
+        ScreenManager.ScreenLifecycle, RealtimeEvents.Listener {
 
     private Command openCommand = new Command("Abrir", Command.OK, 1);
     private Command newCommand = new Command("Nuevo", Command.SCREEN, 2);
     private Command refreshCommand = new Command("Actualizar", Command.SCREEN, 3);
     private Command settingsCommand = new Command("Ajustes", Command.SCREEN, 4);
-    private Command exitCommand = new Command("Salir", Command.EXIT, 5);
+    private Command archivedCommand = new Command("Archivados", Command.SCREEN, 5);
+    private Command exitCommand = new Command("Salir", Command.EXIT, 6);
     private Vector chats;
+    private int archivedCount;
     private int selectedIndex;
     private int scroll;
     private Font titleFont = Font.getFont(Font.FACE_SYSTEM, Font.STYLE_BOLD, Font.SIZE_MEDIUM);
@@ -35,6 +43,7 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
         addCommand(newCommand);
         addCommand(refreshCommand);
         addCommand(settingsCommand);
+        addCommand(archivedCommand);
         addCommand(exitCommand);
         setCommandListener(this);
         loadLocal();
@@ -42,17 +51,49 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
     }
 
     private void loadLocal() {
-        chats = new ChatStorage().getChats();
+        setVisibleChats(new ChatStorage().getChats());
         repaint();
+    }
+
+    private void setVisibleChats(Vector allChats) {
+        chats = new Vector();
+        archivedCount = 0;
+        int i;
+        for (i = 0; allChats != null && i < allChats.size(); i++) {
+            Chat chat = (Chat) allChats.elementAt(i);
+            if (chat.archived) {
+                archivedCount++;
+            } else {
+                chats.addElement(chat);
+            }
+        }
+        if (selectedIndex >= chats.size()) selectedIndex = chats.size() - 1;
+        if (selectedIndex < 0) selectedIndex = 0;
+        if (scroll < 0) scroll = 0;
+    }
+
+    public void onResume() {
+        RealtimeEvents.addListener(this);
+        loadLocal();
+    }
+
+    public void onPause() {
+        RealtimeEvents.removeListener(this);
+    }
+
+    public void onRealtimeMessage(String chatId) { }
+
+    public void onRealtimeChat(String chatId) {
+        loadLocal();
     }
 
     public void run() {
         Vector remote = new ApiClient().getChats();
         if (remote != null && remote.size() > 0) {
-            chats = remote;
-            if (selectedIndex >= chats.size()) {
-                selectedIndex = chats.size() - 1;
-            }
+            new ChatStorage().saveAll(remote);
+            /* saveAll consolida JIDs equivalentes: mostrar la copia local
+               evita pintar duplicados de la respuesta remota. */
+            setVisibleChats(new ChatStorage().getChats());
             repaint();
         }
     }
@@ -61,11 +102,13 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
         if (c == openCommand) {
             openSelected();
         } else if (c == newCommand) {
-            Router.navigate(new NewMessageScreen());
+            openNewChat();
         } else if (c == refreshCommand) {
             new Thread(this).start();
         } else if (c == settingsCommand) {
             Router.navigate(new SettingsScreen());
+        } else if (c == archivedCommand) {
+            Router.navigate(new ArchivedChatsScreen());
         } else if (c == exitCommand) {
             WPJavaMidlet.getInstance().exit();
         }
@@ -83,8 +126,16 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
     }
 
     protected void pointerPressed(int x, int y) {
+        if (y >= 5 && y <= 37 && x >= getWidth() - 92) {
+            openNewChat();
+            return;
+        }
+        if (y >= 5 && y <= 37 && x >= getWidth() - 166 && x < getWidth() - 92) {
+            Router.navigate(new ArchivedChatsScreen());
+            return;
+        }
         int row = (y - 46 + scroll) / 54;
-        if (row >= 0 && row < chats.size()) {
+        if (chats != null && row >= 0 && row < chats.size()) {
             if (selectedIndex == row) {
                 openSelected();
             } else {
@@ -99,22 +150,22 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
         int w = getWidth();
         int h = getHeight();
         g.setFont(normalFont);
-        g.setColor(236, 229, 221);
+        g.setColor(Theme.bgList());
         g.fillRect(0, 0, w, h);
 
         g.setColor(7, 94, 84);
         g.fillRect(0, 0, w, 42);
         g.setColor(255, 255, 255);
         g.setFont(titleFont);
-        g.drawString("WPJava", 10, 10, Graphics.LEFT | Graphics.TOP);
-        g.setFont(normalFont);
-        g.drawString("Nuevo", w - 8, 13, Graphics.RIGHT | Graphics.TOP);
+        g.drawString("WhatsApp", 10, 10, Graphics.LEFT | Graphics.TOP);
+        drawArchivedButton(g);
+        drawNewButton(g, w);
 
         if (chats == null || chats.size() == 0) {
             g.setColor(90, 90, 90);
             g.drawString("Sin conversaciones", w / 2, h / 2 - 10,
                     Graphics.HCENTER | Graphics.TOP);
-            g.drawString("Usa Nuevo para escribir", w / 2, h / 2 + 10,
+            g.drawString(archivedCount > 0 ? "Revisa Archivados" : "Usa Nuevo para escribir", w / 2, h / 2 + 10,
                     Graphics.HCENTER | Graphics.TOP);
             return;
         }
@@ -127,33 +178,80 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
         }
     }
 
+    private void drawNewButton(Graphics g, int width) {
+        int x = width - 88;
+        int y = 6;
+        g.setColor(0xB2DFDB);
+        g.fillRoundRect(x, y, 80, 30, 14, 14);
+        g.setColor(0xFFFFFF);
+        g.drawRoundRect(x, y, 80, 30, 14, 14);
+        g.setColor(0x075E54);
+        g.setFont(boldFont);
+        g.fillArc(x + 8, y + 6, 19, 19, 0, 360);
+        g.setColor(0xFFFFFF);
+        g.drawArc(x + 11, y + 9, 13, 13, 0, 360);
+        g.drawLine(x + 13, y + 20, x + 11, y + 23);
+        g.drawLine(x + 16, y + 17, x + 20, y + 13);
+        g.setColor(0x075E54);
+        g.drawString("Nuevo", x + 54, y + 9, Graphics.HCENTER | Graphics.TOP);
+    }
+
+    private void drawArchivedButton(Graphics g) {
+        int x = getWidth() - 166;
+        int y = 7;
+        g.setColor(0x075E54);
+        g.fillRoundRect(x, y, 76, 27, 12, 12);
+        g.setColor(0xB2DFDB);
+        g.drawRoundRect(x, y, 76, 27, 12, 12);
+        g.setColor(0xFFFFFF);
+        g.setFont(normalFont);
+        String label = archivedCount > 0 ? "Arch. " + archivedCount : "Arch.";
+        g.drawString(label, x + 38, y + 8, Graphics.HCENTER | Graphics.TOP);
+    }
+
     private void drawRow(Graphics g, Chat chat, int index, int y, int w) {
         if (y > getHeight() || y < -54) {
             return;
         }
         if (index == selectedIndex) {
-            g.setColor(220, 248, 198);
+            g.setColor(Theme.selected());
         } else {
-            g.setColor(255, 255, 255);
+            g.setColor(Theme.bgList());
         }
         g.fillRect(4, y, w - 8, 52);
+        if (index == selectedIndex) {
+            g.setColor(Theme.selectedBorder());
+            g.fillRect(4, y, 4, 52);
+            g.setColor(Theme.selectedBorder());
+            g.drawRoundRect(4, y, w - 9, 51, 5, 5);
+            g.setColor(255, 255, 255);
+            g.setFont(boldFont);
+            g.drawString(">", w - 12, y + 31, Graphics.RIGHT | Graphics.TOP);
+        }
 
-        g.setColor(18, 140, 126);
+        g.setColor(chat.isGroup() ? 0x546E7A : 0x128C7E);
         g.fillArc(12, y + 9, 34, 34, 0, 360);
-        g.setColor(255, 255, 255);
-        g.setFont(boldFont);
-        g.drawString(initial(chat.name), 29, y + 18, Graphics.HCENTER | Graphics.TOP);
+        Image avatar = chat.isGroup() ? null : AvatarCache.get(chat.avatar, 32, 32, this);
+        if (avatar != null) {
+            g.drawImage(avatar, 13, y + 10, Graphics.LEFT | Graphics.TOP);
+        } else {
+            g.setColor(255, 255, 255);
+            g.setFont(boldFont);
+            g.drawString(chat.isGroup() ? "G" : initial(chat.name), 29, y + 18,
+                    Graphics.HCENTER | Graphics.TOP);
+        }
 
-        g.setColor(20, 20, 20);
+        g.setColor(Theme.text());
         g.drawString(shorten(chat.name, w - 110, boldFont), 56, y + 7,
                 Graphics.LEFT | Graphics.TOP);
         g.setFont(normalFont);
-        g.setColor(90, 90, 90);
-        g.drawString(shorten(chat.lastMessage, w - 92, normalFont), 56, y + 27,
+        g.setColor(Theme.textGray());
+        String preview = chat.isGroup() ? "Grupo: " + chat.lastMessage : chat.lastMessage;
+        g.drawString(shorten(preview, w - 92, normalFont), 56, y + 27,
                 Graphics.LEFT | Graphics.TOP);
 
-        g.setColor(110, 110, 110);
-        g.drawString(DateUtil.shortDate(chat.timestamp), w - 8, y + 7,
+        g.setColor(Theme.textGray());
+        g.drawString(DateUtil.time(chat.timestamp), w - 8, y + 7,
                 Graphics.RIGHT | Graphics.TOP);
         if (chat.unread > 0) {
             g.setColor(37, 211, 102);
@@ -162,14 +260,27 @@ public class ChatListScreen extends Canvas implements CommandListener, Runnable 
             g.drawString(String.valueOf(chat.unread), w - 19, y + 29,
                     Graphics.HCENTER | Graphics.TOP);
         }
-        g.setColor(225, 225, 225);
+        g.setColor(Theme.sep());
         g.drawLine(56, y + 51, w - 8, y + 51);
     }
 
     private void openSelected() {
         if (chats != null && selectedIndex >= 0 && selectedIndex < chats.size()) {
-            Router.navigate(new ChatScreen((Chat) chats.elementAt(selectedIndex)));
+            final Chat chat = (Chat) chats.elementAt(selectedIndex);
+            chat.unread = 0;
+            new ChatStorage().saveChat(chat);
+            repaint();
+            new Thread(new Runnable() {
+                public void run() {
+                    new ApiClient().markChatRead(chat.id);
+                }
+            }).start();
+            Router.navigate(new ChatScreen(chat));
         }
+    }
+
+    private void openNewChat() {
+        new NewChatScreen().show();
     }
 
     private void move(int delta) {

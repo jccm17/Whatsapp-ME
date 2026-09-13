@@ -18,7 +18,8 @@ import com.wpjava.service.ApiClient;
 import com.wpjava.storage.MessageStorage;
 
 /** Screen for composing a message with a WhatsApp-inspired layout. */
-public class NewMessageScreen extends Canvas implements CommandListener, Runnable {
+public class NewMessageScreen extends Canvas implements CommandListener, Runnable,
+        EmoticonPickerScreen.Target {
 
     private static final int GREEN_DARK = 7;
     private static final int GREEN = 18;
@@ -171,7 +172,7 @@ public class NewMessageScreen extends Canvas implements CommandListener, Runnabl
         }
         editor = null;
         editingField = -1;
-        Router.navigate(this);
+        Router.replace(this);
         repaint();
     }
 
@@ -213,6 +214,10 @@ public class NewMessageScreen extends Canvas implements CommandListener, Runnabl
         message = message + value;
         selectedField = 1;
         repaint();
+    }
+
+    public Displayable getEmoticonDisplayable() {
+        return this;
     }
 
     private Chat createChat(String to) {
